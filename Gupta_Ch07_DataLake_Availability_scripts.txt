@@ -1,0 +1,168 @@
+//Steps to setup high-availability of Kerberos key distribution center (KDC)
+
+1. Chose a master node as slave KDC and install krb5-server, krb5-libs, krb5-workstation
+
+sudo yum install -y krb5-server
+sudo yum install -y krb5-libs
+sudo yum install -y krb5-workstation
+
+2. Backup krb5.conf on KDC master and create its copy on slave KDC node
+3. Backup kdc.conf on slave KDC node
+4. Edit kdc.conf on master and slave KDC nodes as below
+
+sudo vi /var/kerberos/krb5kdc/kdc.conf
+[kdcdefaults]
+kdc_ports = 88
+kdc_tcp_ports = 88
+[realms]
+DLSEC-SAMPLE.DOMAIN.COM = {
+#master_key_type = aes256-cts
+acl_file = /var/kerberos/krb5kdc/kadm5.acl
+dict_file = /usr/share/dict/words
+admin_keytab = /var/kerberos/krb5kdc/kadm5.keytab
+supported_enctypes = aes256-cts:normal aes128-cts:normal des3-hmac-sha1:normal arcfour-hmac:normal des-hmac-sha1:normal des-cbc-md5:normal des-cbc-crc:normal
+}
+
+sudo chmod 655 /var/kerberos/krb5kdc/kdc.conf
+
+5. Update kadm5.acl on master and slave KDC nodes
+vi /var/kerberos/krb5kdc/kadm5.acl
+*/admin@DLSEC-SAMPLE.DOMAIN.COM *
+sudo cp /var/kerberos/krb5kdc/kadm5.acl /tmp/
+sudo chmod 777 /tmp/kadm5.acl
+scp /tmp/kadm5.acl hdp@10.256.39.70:/tmp
+scp /tmp/kadm5.acl hdp@10.256.13.2:/tmp
+sudo cp /tmp/kadm5.acl /var/kerberos/krb5kdc/kadm5.acl
+sudo chmod 655 /var/kerberos/krb5kdc/kadm5.acl
+
+6. Update file /var/kerberos/krb5kdc/kpropd.acl on Kerberos Master and Slave
+sudo vi /var/kerberos/krb5kdc/kpropd.acl
+host/ip-10-256-38-70.ec2.internal@DLSEC-SAMPLE.DOMAIN.COM
+host/ip-10-256-13-2.ec2.internal@DLSEC-SAMPLE.DOMAIN.COM
+sudo chmod 655 /var/kerberos/krb5kdc/kpropd.acl
+
+7. Install xinetd on Kerberos and initialize kerberos internal database on master and slave KDC nodes
+sudo yum install -y xinetd
+sudo kdb5_util create –s
+KDC Database MAster Key: xxxxxx
+
+8. Create an administrator principal to manage Kerberos realm
+sudo kadmin.local -q "addprinc kdcadmin/admin"
+Principal password: xxxxxxx
+
+9. Create host keytabs for slave KDC on master KDC
+kadmin.local
+addprinc -randkey host/ip-10-256-38-70.ec2.internal
+addprinc -randkey host/ip-10-256-13-2.ec2.internal
+
+10. Extract the host key for slave KDC and update the hosts keytab file /etc/krb5.keytab.slave. Copy to slave KDC.
+
+-------on Master KDC--------
+ktadd –k /etc/krb5.keytab host/ip-10-256-38-70.ec2.internal
+ktadd –k /etc/krb5.keytab host/ip-10-256-13-2.ec2.internal
+sudo chmod 644 /etc/krb5.keytab
+
+-------on Slave KDC--------
+scp /etc/krb5.keytab hdp@10.256.13.2:/tmp
+sudo cp /tmp/krb5.keytab /etc/krb5.keytab
+sudo chmod 644 /etc/krb5.keytab
+
+11. Update /etc/services on both KDC hosts
+sudo vi /etc/services 
+krb_prop 754/tcp # Kerberos slave propagation
+
+12. Configure kpropd on both the KDC nodes in /etc/xinetd.d/krb5_prop
+sudo vi /etc/xinetd.d/krb5_prop
+service krb_prop
+{
+disable = no
+socket_type = stream
+protocol = tcp
+user = root
+wait = no
+server = /usr/sbin/kpropd
+port = 754
+}
+
+13. Start KDC and kadmin processes on master KDC
+sudo systemctl enable krb5kdc 
+sudo systemctl start krb5kdc 
+sudo systemctl status krb5kdc 
+sudo systemctl enable kadmin 
+sudo systemctl start kadmin 
+sudo systemctl status kadmin
+
+14. Run xinetd as persistent service on both the KDC hosts
+sudo systemctl enable xinetd.service
+sudo systemctl start xinetd.service
+sudo systemctl status xinetd.service
+
+15. Replicate KDC database to slave KDC node and start the slave KDC
+sudo kdb5_util dump /var/kerberos/krb5kdc/slave_datatrans
+sudo kprop -f /var/kerberos/krb5kdc/slave_datatrans ip-10-256-13-2.ec2.internal
+sudo systemctl enable krb5kdc
+sudo systemctl start krb5kdc
+sudo systemctl status krb5kdc
+
+16. Setup a cron to propagate the updates from master KDC node to slave KDC
+
+
+//Sample configuration in hdfs-site.xml for high availability of NameNodes
+
+---------Logical name for new Nameservice---------
+<property> 
+  <name>dfs.nameservices</name>
+  <value>dl_clustr</value>
+</property>
+
+---------Configure list of NameNode identifiers in each nameservice---------
+<property>
+  <name>dfs.ha.namenodes.dl_clustr</name>
+  <value>nn_active,nn_stby</value>
+</property>
+
+---------RPC address for each NameNode---------
+<property>
+  <name>dfs.namenode.rpc-address.dl_clustr.nn_active</name>
+  <value>dlmc1.machine.com:8020</value>
+</property>
+<property>
+  <name>dfs.namenode.rpc-address.dl_clustr.nn_stby</name>
+  <value>dlmc2.machine.com:8020</value>
+</property>
+
+---------HTTP address for each NameNode---------
+<property>
+  <name>dfs.namenode.http-address.dl_clustr.nn_active</name>
+  <value>dlmc1.machine.com:50070</value>
+</property>
+<property>
+  <name>dfs.namenode.http-address.dl_clustr.nn_stby</name>
+  <value>dlmc2.machine.com:50070</value>
+</property>
+
+---------JN URI where the edits would be written and read by NameNodes-----
+<property>
+  <name>dfs.namenode.shared.edits.dir</name>
+  <value>qjournal://jnode1.machine.com:8485;jnode2.machine.com:8485;
+jnode3.machine.com:8485/dl_clustr</value>
+</property>
+
+---------JN local directory where edits could be persisted---------
+<property>
+  <name>dfs.journalnode.edits.dir</name>
+  <value>/dfs/journal/localdata</value>
+</property>
+
+---------Java class to ping Active NameNode---------
+<property>
+  <name>dfs.client.failover.proxy.provider.dl_clustr</name>
+  <value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider
+</value>
+</property>
+
+---------HA fencing configuration using shell method---------
+<property>
+  <name>dfs.ha.fencing.methods</name>
+  <value>shell(/path/to/my/script.sh arg1 arg2 ...)</value>
+</property>

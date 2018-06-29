@@ -1,0 +1,31 @@
+//Merge data changes using piglatin
+
+---sample data in a hive partition---
+[bda@datalake sample-merge]$ cat hive_part4.txt
+
+---change dataset that needs to be merged with PART4---
+[bda@datalake sample-merge]$ cat change_dataset.txt
+
+---Pig script to merge the changes with original file---
+
+A = LOAD '/user/bda/merge_change/hive_p4_merged_set.txt' 
+using PigStorage('\u0001') 
+AS (
+opcode:chararray
+, seqno:chararray
+, row_id:chararray
+, commit_timestamp:chararray
+, id:chararray
+, place:chararray);
+B = GROUP A BY id;
+C = foreach B {
+D = order A by seqno, row_id desc;
+top = limit D 1;
+generate flatten(top);
+};
+
+---Check and verify the changes in main file---
+[bda@datalake sample-merge]$ cat hive_p4_merged_set.txt
+
+
+

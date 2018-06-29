@@ -1,0 +1,101 @@
+---The below script demonstrates that a partition key column must not be specified in the table column specification---
+
+CREATE TABLE dataLake_sor 
+	(
+	 sorId   INT
+	,sorName STRING
+	)
+PARTITIONED BY (userId STRING)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+
+
+---The below table creates partitions by YEAR with 25 buckets indicating areas and their population details---
+
+CREATE TABLE city_population_store 
+	(
+	area STRING,
+	record_date STRING,
+	last_count INT,
+	current_count INTO
+	)
+PARTITIONED BY (year STRING)
+CLUSTERED BY (area) INTO 200 BUCKETS;
+
+---Use TABLESAMPLE clause to use sample data from a table for query processing---
+
+SELECT *
+FROM abcTelecom_logs
+TABLESAMPLE (5 percent)
+
+---Use TABLESAMPLE clause to perform bucketize sampling---
+
+SELECT *
+FROM abcTelecom_logs
+TABLESAMPLE (BUCKET 5 OUT OF 50 ON city)
+
+
+//SPARK code snippets
+
+---Create a Spark Session---
+
+import org.apache.spark.sql.SparkSession
+val spark = SparkSession.builder().appName("Spark SQL basic example").config("spark.some.config.option", "some-value").getOrCreate()
+
+---Create a datfrane from a file or existing RDD, or Hive tables---
+
+val df = spark.read.json("examples/src/main/resources/people.json")
+df.show()
+
+---DataFrame Operations---
+
+----i.	Print Schema of the DataFrame----
+
+df.printSchema()
+
+----ii.	Select specific column----
+
+df.select("name").show()
+
+----iii.	Select all columns, increment age column by 1.----
+
+df.select($"name", $"age" + 1).show()
+
+----iv.	Filter the dataframe with age >25----
+
+df.filter($"age" > 21).show()
+
+----v.	Count people by age.----
+
+df.groupBy("age").count().show()
+
+---Load Hive table---
+
+val table1 = spark.sql(“[db_name].[table_name]”)
+table1: org.apache.spark.sql.DataFrame = [col1: datatype, col2: datatype... 71 more fields]
+
+---Run SQL queries against dataframe---
+
+df.createOrReplaceTempView("people")
+val sqlDF = spark.sql("SELECT * FROM people")
+sqlDF.show()
+
+//Oracle Big Data SQL
+
+The below CREATE TABLE script creates an external table for hive table social_cmt_hv.
+
+CREATE TABLE ratings_db_table (   
+   col0 VARCHAR2(4000),
+   col1 VARCHAR2(4000),
+   col2 VARCHAR2(4000)
+)
+ORGANIZATION EXTERNAL
+   (TYPE ORACLE_HIVE DEFAULT DIRECTORY DEFAULT_DIR 
+   ACCESS PARAMETERS
+      (
+       com.oracle.bigdata.cluster=hadoop
+       com.oracle.bigdata.tablename=default.social_cmt_hv
+      )
+   ) PARALLEL 2 REJECT LIMIT UNLIMITED
+
+
